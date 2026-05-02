@@ -1,322 +1,203 @@
-# POST /api/user/generate
+# User API — Reference Documentation
 
-Executes the AI generation workflow for a previously initiated job. This is the **second and final step** after `/api/user/generate/initiate`.
-
-The endpoint:
-1. Verifies the generation record exists and belongs to the authenticated user.
-2. Confirms the record is still in "initiated" state.
-3. Merges any uploaded media URLs from the initiate step into the workflow inputs.
-4. Executes the full AI workflow (Gemini / Wan 2.2 / RunPod).
-5. Returns the result — or falls back to an FCM push notification if processing exceeds 30 seconds.
+> **Base URL** `https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com`
+>
+> All protected routes require a `Authorization: Bearer <access_token>` header. Tokens are issued by the auth endpoints below.
 
 ---
 
-## Base URL
+## Table of Contents
 
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
-
----
-
-## Authentication
-
-| Type | Details |
-|---|---|
-| **Scheme** | Bearer token (custom Lambda JWT authorizer – `UserJwtAuth`) |
-| **Header** | `Authorization: Bearer <access_token>` |
-| **Token source** | Obtained from `/api/auth/email/verify-otp`, `/api/auth/social`, or `/api/auth/refresh-token` |
-
-> The user's `email` is extracted from the verified JWT claims. A missing or invalid token returns **`401 Unauthorized`** before the function is invoked.
+1. [User Profile](#1-user-profile)
+   - [Get Profile](#11-get-profile)
+2. [Templates](#2-templates)
+   - [List Templates](#21-list-templates)
+   - [List Sub-Templates](#22-list-sub-templates)
+3. [Generation](#3-generation)
+   - [Initiate Generation](#31-initiate-generation)
+   - [Start Generation](#32-start-generation)
+   - [Generation History](#33-generation-history)
+4. [Plans & Purchases](#4-plans--purchases)
+   - [Get Plans](#41-get-plans)
+5. [Error Reference](#5-error-reference)
+6. [Generation Lifecycle](#6-generation-lifecycle)
 
 ---
 
-## Request
+## Common Conventions
 
-### Method & Path
+### Authentication
+
+Protected routes use a **custom Lambda JWT authorizer**. The authorizer validates the Bearer token and injects the user's `email` into the request context. If the token is missing, expired, or invalid, the request is rejected before reaching the Lambda handler.
 
 ```
-POST /api/user/generate
+Authorization: Bearer <access_token>
 ```
 
-### Headers
+### Response Envelope
 
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
-| `Content-Type` | ✅ Yes | `application/json` |
-
-### Query Parameters
-
-_None_
-
-### Request Body
+All responses follow a consistent shape:
 
 ```json
+// Success
+{ "success": true, ...data }
+
+// Error
+{ "error": "human-readable message" }
+// or
+{ "success": false, "error": "human-readable message" }
+```
+
+### CORS
+
+All endpoints allow `*` origins. `OPTIONS` preflight requests are handled automatically by API Gateway.
+
+---
+
+## 1. User Profile
+
+### 1.1 Get Profile
+
+Returns the authenticated user's profile. Sensitive fields (`passwordHash`, OTP fields, refresh token, etc.) are stripped before the response.
+
+```
+GET /api/user/profile
+```
+
+**Headers**
+
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+
+**Responses**
+
+```json
+// 200
 {
-  "generationId": "a41c5544-771a-460d-ad22-f1507632a645",
-  "userInputs": {
-    "inputImage-1777726635413": "user_assets/a41c5544-771a-460d-ad22-f1507632a645/inputImage-1777726635413_1777750182122_upload_1777750182122.jpg"
+  "success": true,
+  "profile": {
+    "email": "user@example.com",
+    "name": "Jane Doe",
+    "credits": 250,
+    "createdAt": 1714247549000,
+    "status": "active"
   }
 }
+
+// 401 — Missing or invalid token
+{ "message": "Unauthorized missing identity context.", "success": false }
+
+// 403 — Account banned
+{ "message": "Your account has been banned. Please contact support.", "success": false }
+
+// 404 — User record not found
+{ "message": "User not found.", "success": false }
 ```
 
-#### Request Body Fields
+---
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `generationId` | `string` | ✅ Yes | The UUID returned by `/api/user/generate/initiate`. Identifies the generation job to execute. |
-| `userInputs` | `object` | ❌ No | Fully dynamic key-value map of `nodeId → value`. Keys and values vary per workflow — see below. |
+## 2. Templates
 
-#### `userInputs` Structure
-
-The `userInputs` object is **completely dynamic** — its keys are workflow node IDs and its values depend on the node type.
-
-| Node ID pattern | Value type | Example value |
-|---|---|---|
-| `inputImage-*` | `string` — S3 key from the presigned upload | `"user_assets/a41c5544.../inputImage-177...jpg"` |
-| `inputVideo-*` | `string` — S3 key from the presigned upload | `"user_assets/a41c5544.../inputVideo-177...mp4"` |
-| `inputText-*` | `string` — free text entered by the user | `"A futuristic city at sunset"` |
-
-> Pass `{}` or omit `userInputs` entirely if the workflow has no user inputs.
+Templates represent the AI workflows available to users. Sub-templates are pre-filled example runs for a given template.
 
 ---
 
-## Behavior
+### 2.1 List Templates
 
-1. Reads `email` from the verified JWT claims.
-2. Validates `generationId` is present in the body.
-3. Fetches the generation record from `UserGenerationsTable` using `{ id: email, generationId }` — fails with `404` if not found.
-4. Checks that `status === "initiated"` — fails with `400` if the job is already in another state.
-5. Fetches the linked `SubTemplate` and `DeployedWorkflow` from DynamoDB in parallel.
-6. Merges user text inputs with S3 media URLs and admin-fixed assets.
-7. Marks the generation as "processing" in DynamoDB.
-8. Executes the full AI workflow via `ExecuteWorkflow`.
-9. Sets the final status to "complete" or "pending".
-10. If execution exceeds 30 seconds, the result is sent via FCM push notification.
-11. On any error, the function attempts to refund credits and mark as "failed".
+Returns all **Active** deployed workflow templates.
 
----
+```
+GET /api/user/templates
+```
 
-## Responses
+**Headers**
 
-### ✅ 200 OK — Image Generation Complete (synchronous)
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+
+**Responses**
 
 ```json
+// 200
 {
   "success": true,
-  "finalStatus": "complete",
-  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.png"
-}
-```
-
-### ✅ 200 OK — Video Generation Started (asynchronous)
-
-```json
-{
-  "success": true,
-  "finalStatus": "pending"
-}
-```
-
-### ❌ 400 Bad Request
-
-```json
-{ "error": "invalid JSON body" }
-```
-
-### ❌ 401 Unauthorized
-
-```json
-{ "error": "unauthorized" }
-```
-
-### ❌ 404 Not Found
-
-```json
-{ "error": "generation record not found or access denied" }
-```
-
-### ❌ 500 Internal Server Error
-
-```json
-{ "error": "<error message string>" }
-```
-
----
-
-## Summary of Status Codes
-
-| HTTP Status | Scenario |
-|---|---|
-| `200` | Generation complete or async video started |
-| `400` | Invalid body or job not in initiated state |
-| `401` | Missing or invalid JWT token |
-| `404` | Generation record not found |
-| `500` | Workflow execution failed |
-
----
-
-# GET /api/user/plans
-
-Returns all **Active** subscription plans and in-app purchases (IAPs) available for a specific platform. Plans are sorted by `monthlyPrice` ascending; IAPs are sorted by `price` ascending.
-
----
-
-## Base URL
-
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
-
----
-
-## Authentication
-
-| Type | Details |
-|---|---|
-| **Scheme** | Bearer token (custom Lambda JWT authorizer – `UserJwtAuth`) |
-| **Header** | `Authorization: Bearer <access_token>` |
-| **Token source** | Obtained from `/api/auth/email/verify-otp`, `/api/auth/social`, or `/api/auth/refresh-token` |
-
----
-
-## Request
-
-### Method & Path
-
-```
-GET /api/user/plans?platform=android
-```
-
-### Headers
-
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
-
-### Query Parameters
-
-| Parameter | Required | Default | Description |
-|---|---|---|---|
-| `platform` | ❌ No | `android` | Target platform — `android` or `ios` |
-
----
-
-## Behavior
-
-1. Reads the `platform` query parameter (defaults to "android").
-2. Scans the `PlansTable` filtering for items where `status = "Active"` AND platform matches.
-3. Splits results into plans and IAPs.
-4. Returns both groups along with the resolved platform string.
-
----
-
-## Responses
-
-### ✅ 200 OK — Success
-
-```json
-{
-  "success": true,
-  "platform": "android",
-  "plans": [
+  "templates": [
     {
-      "id": "plan_1777564651293",
-      "name": "Ad Free",
-      "category": "plan",
-      "status": "Active",
-      "monthlyPrice": 19.99,
-      "yearlyPrice": 200,
-      "features": ["No Ads", "100 Credit each month"]
+      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+      "name": "Photo Restoration",
+      "description": "Restore and enhance old or damaged photos",
+      "category": "image",
+      "thumbnail": "https://cdn.example.com/thumbnails/photo-restore.jpg",
+      "schema": {
+        "summary": {
+          "outputType": "image",
+          "outputImageCount": 1,
+          "hasGemini": true,
+          "userTextInputCount": 0
+        }
+      }
     }
   ],
-  "iaps": []
+  "templateOrder": ["d59d2ad2-fb2d-4f32-9880-9833a712aefc"]
 }
 ```
 
-### ❌ 401 Unauthorized
+| Field           | Type       | Description                                                      |
+|-----------------|------------|------------------------------------------------------------------|
+| `workflowId`    | `string`   | Unique identifier — use this for all subsequent template calls   |
+| `name`          | `string`   | Display name                                                     |
+| `description`   | `string`   | Short description                                                |
+| `category`      | `string`   | Content category (`"image"`, `"video"`, etc.)                    |
+| `thumbnail`     | `string`   | URL of the preview image                                         |
+| `schema.summary`| `object`   | Quick-look metadata about this workflow (see below)              |
+| `templateOrder` | `string[]` | Ordered list of `workflowId`s for display ordering              |
+
+**`schema.summary` fields**
+
+| Field                | Type      | Description                                   |
+|----------------------|-----------|-----------------------------------------------|
+| `outputType`         | `string`  | `"image"` or `"video"`                        |
+| `outputImageCount`   | `number`  | Number of images produced per run             |
+| `hasGemini`          | `boolean` | Whether the workflow uses Gemini AI           |
+| `userTextInputCount` | `number`  | Number of free-text inputs the user must fill |
+
+---
+
+### 2.2 List Sub-Templates
+
+Returns all **example** sub-templates for a given workflow. Sub-templates represent pre-filled example runs and are used to show users what the workflow produces.
+
+```
+GET /api/user/sub-templates/{workflowId}
+```
+
+**Path Parameters**
+
+| Parameter    | Required | Description                          |
+|--------------|----------|--------------------------------------|
+| `workflowId` | ✅        | The `workflowId` from List Templates |
+
+**Headers**
+
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+
+**Responses**
 
 ```json
-{ "message": "Unauthorized" }
-```
-
-### ❌ 500 Internal Server Error
-
-```json
-{ "success": false, "error": "Internal server error" }
-```
-
----
-
-## Summary of Status Codes
-
-| HTTP Status | Scenario |
-|---|---|
-| `200` | Plans and IAPs returned successfully |
-| `401` | Missing or invalid JWT token |
-| `500` | Internal error |
-
----
-
-# GET /api/user/sub-templates/{id}
-
-Fetches all **example sub-templates** that belong to a specific deployed workflow template.
-
----
-
-## Base URL
-
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
-
----
-
-## Request
-
-### Method & Path
-
-```
-GET /api/user/sub-templates/{id}
-```
-
-### Path Parameters
-
-| Parameter | Required | Description |
-|---|---|---|
-| `id` | ✅ Yes | The `workflowId` of the parent template |
-
-### Headers
-
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
-
----
-
-## Behavior
-
-1. Extracts `workflowId` from the path parameter.
-2. Queries the `SubTemplatesTable` filtering for items where `isExample = true`.
-3. Returns projected fields: id, workflowId, userInputsSchema, title, outputType, url.
-
----
-
-## Responses
-
-### ✅ 200 OK — Success
-
-```json
+// 200
 {
   "success": true,
   "subTemplates": [
     {
       "id": "2a9dce00-0554-42b9-a339-842a1676019b",
-      "workflowId": "63e79239-8420-4088-97a4-c0e78cb3931f",
-      "title": "Restore and enhance this photo",
+      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+      "title": "Restore this vintage portrait",
       "outputType": "image",
-      "url": "https://example.s3.amazonaws.com/...",
+      "url": "https://cdn.example.com/outputs/example-result.jpg",
       "userInputsSchema": [
         {
           "nodeId": "inputImage-1777726635413",
@@ -329,241 +210,427 @@ GET /api/user/sub-templates/{id}
 }
 ```
 
-### ❌ 401 Unauthorized
+| Field              | Type       | Description                                              |
+|--------------------|------------|----------------------------------------------------------|
+| `id`               | `string`   | Sub-template ID — pass as `subTemplateId` when initiating |
+| `workflowId`       | `string`   | Parent workflow ID                                       |
+| `title`            | `string`   | Short description of this example                        |
+| `outputType`       | `string`   | `"image"` or `"video"`                                   |
+| `url`              | `string`   | URL of the example output (for preview)                  |
+| `userInputsSchema` | `object[]` | Describes each input node the user must supply           |
 
-```json
-{ "message": "Unauthorized" }
-```
+**`userInputsSchema` item**
 
----
-
-# GET /api/user/templates
-
-Fetches all **Active** deployed workflow templates available for end-users.
-
----
-
-## Base URL
-
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
+| Field       | Type       | Description                                                  |
+|-------------|------------|--------------------------------------------------------------|
+| `nodeId`    | `string`   | Node ID — used as the key in `userInputs` when generating   |
+| `inputType` | `string`   | `"image"`, `"video"`, or `"text"`                            |
+| `feedsInto` | `string[]` | Which processing nodes consume this input                    |
 
 ---
 
-## Request
+## 3. Generation
 
-### Method & Path
+Generating content is a **two-step process**:
 
 ```
-GET /api/user/templates
+Step 1 → POST /api/user/generate/initiate
+         • Deducts credits
+         • Returns a generationId and pre-signed S3 upload URLs for media
+
+Step 2 → Upload media directly to S3 (using the pre-signed URLs from Step 1)
+
+Step 3 → POST /api/user/generate/start
+         • Executes the AI workflow
+         • Returns the result (image) or a pending status (video)
 ```
 
-### Headers
-
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
+See [Generation Lifecycle](#6-generation-lifecycle) for a complete flow diagram.
 
 ---
 
-## Behavior
+### 3.1 Initiate Generation
 
-1. Reads the `template_order` configuration from `ConfigurationsTable`.
-2. Scans `DeployedWorkflowsTable` for items where `status = "Active"`.
-3. Returns projected fields: workflowId, name, description, category, thumbnail, schema.summary.
-
----
-
-## Responses
-
-### ✅ 200 OK — Success
-
-```json
-{
-  "success": true,
-  "templates": [
-    {
-      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
-      "name": "Text to image",
-      "description": "",
-      "category": "",
-      "thumbnail": "",
-      "schema": {
-        "summary": {
-          "outputType": "image",
-          "outputImageCount": 1,
-          "hasGemini": true,
-          "userTextInputCount": 1
-        }
-      }
-    }
-  ],
-  "templateOrder": ["8d0c436e-7225-4796-8ae1-a58c26b3e28d"]
-}
-```
-
----
-
-# POST /api/user/generate/initiate
-
-Initiates a new AI generation job for a user.
-
----
-
-## Base URL
-
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
-
----
-
-## Request
-
-### Method & Path
+Creates a generation job, deducts credits from the user's balance, and returns pre-signed S3 URLs for uploading input media.
 
 ```
 POST /api/user/generate/initiate
 ```
 
-### Headers
+**Headers**
 
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
-| `Content-Type` | ✅ Yes | `application/json` |
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+| `Content-Type`  | ✅        | `application/json`       |
 
-### Request Body
+**Request Body**
 
 ```json
 {
-  "workflowId": "5b952c74-1f0c-4096-a525-66c04dace950",
-  "subTemplateId": "e017f52b-2cae-48d4-b143-68874d7f6899",
+  "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+  "subTemplateId": "2a9dce00-0554-42b9-a339-842a1676019b",
   "platform": "android",
-  "fcmToken": "dAFe8N5GfAyVOKW1L_4jh9:APA91bErYXPEIFR..."
+  "fcmToken": "dAFe8N5G...",
+  "mediaFiles": [
+    {
+      "nodeId": "inputImage-1777726635413",
+      "fileName": "photo.jpg",
+      "fileType": "image/jpeg"
+    }
+  ]
 }
 ```
 
-#### Request Body Fields
+| Field          | Type       | Required | Description                                                                   |
+|----------------|------------|----------|-------------------------------------------------------------------------------|
+| `workflowId`   | `string`   | ✅        | From [List Templates](#21-list-templates)                                     |
+| `subTemplateId`| `string`   | ✅        | From [List Sub-Templates](#22-list-sub-templates)                             |
+| `platform`     | `string`   | ✅        | `"android"` or `"ios"` — used for push notification routing                  |
+| `fcmToken`     | `string`   | ❌        | Firebase Cloud Messaging device token — required to receive push notifications |
+| `mediaFiles`   | `object[]` | ❌        | Metadata for each media file to upload. If omitted, defaults are used.        |
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `workflowId` | `string` | ✅ Yes | UUID of the deployed workflow |
-| `subTemplateId` | `string` | ✅ Yes | UUID of the sub-template |
-| `platform` | `string` | ✅ Yes | `"android"` or `"ios"` |
-| `fcmToken` | `string` | ❌ No | Firebase Cloud Messaging token |
+**`mediaFiles` item**
 
----
+| Field      | Type     | Required | Description                                  |
+|------------|----------|----------|----------------------------------------------|
+| `nodeId`   | `string` | ✅        | Must match a node ID from `userInputsSchema` |
+| `fileName` | `string` | ❌        | Original filename (used for the S3 key)      |
+| `fileType` | `string` | ❌        | MIME type, e.g. `"image/jpeg"`, `"video/mp4"` |
 
-## Behavior
-
-1. Reads user email from JWT claims.
-2. Validates workflowId, subTemplateId, and platform.
-3. Fetches workflow and sub-template records.
-4. Deducts credits from user's balance atomically.
-5. Generates pre-signed S3 PUT URLs for media uploads (valid 1 hour).
-6. Saves generation record with status "initiated".
-7. Returns generationId and upload URLs.
-
----
-
-## Responses
-
-### ✅ 200 OK — Initiation Successful
+**Responses**
 
 ```json
+// 200 — Initiated successfully
 {
   "success": true,
   "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
   "uploadUrls": [
     {
-      "nodeId": "inputImage-1776862028188",
-      "uploadUrl": "https://admin-backend-users.s3.ap-south-1.amazonaws.com/...",
-      "key": "user_assets/62a34ac6.../inputImage-1776862028188.jpg",
+      "nodeId": "inputImage-1777726635413",
+      "uploadUrl": "https://user-bucket.s3.ap-south-1.amazonaws.com/user_assets/...?X-Amz-Signature=...",
+      "key": "user_assets/62a34ac6.../inputImage-1777726635413_1714247549000_photo.jpg",
       "inputType": "image"
     }
   ]
 }
 ```
 
-### ❌ 403 Forbidden — Insufficient Credits
+```json
+// 400 — Validation error
+{ "error": "missing workflowId or subTemplateId" }
+{ "error": "invalid or missing platform. Must be 'android' or 'ios'" }
+
+// 401 — Unauthorized
+{ "error": "unauthorized" }
+
+// 403 — Insufficient credits
+{ "success": false, "error": "insufficient credits" }
+
+// 404 — Workflow or sub-template not found
+{ "error": "workflow not found" }
+{ "error": "sub-template not found" }
+
+// 500 — Internal error
+{ "error": "<message>" }
+```
+
+**After this call:**
+1. Upload each media file to its `uploadUrl` using an HTTP `PUT` request with the matching `Content-Type` header. The pre-signed URL is valid for **1 hour**.
+2. Call [Start Generation](#42-start-generation) with the returned `generationId`.
+
+---
+
+### 3.2 Start Generation
+
+Executes the AI workflow for a previously initiated job. This is the final trigger — the workflow runs immediately and synchronously up to the 29-second API Gateway limit. Long-running video jobs switch to async and deliver results via FCM push notification.
+
+```
+POST /api/user/generate/start
+```
+
+**Headers**
+
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+| `Content-Type`  | ✅        | `application/json`       |
+
+**Request Body**
 
 ```json
 {
-  "success": false,
-  "error": "insufficient credits"
+  "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
+  "userInputs": {
+    "inputText-17777889": "A futuristic city at sunset",
+    "inputImage-1777726635413": "user_assets/62a34ac6.../inputImage-1777726635413_photo.jpg"
+  }
+}
+```
+
+| Field          | Type     | Required | Description                                                               |
+|----------------|----------|----------|---------------------------------------------------------------------------|
+| `generationId` | `string` | ✅        | The ID returned by [Initiate Generation](#31-initiate-generation)         |
+| `userInputs`   | `object` | ❌        | Key-value map of `nodeId → value`. Omit or pass `{}` if no user inputs.  |
+
+**`userInputs` values by node type**
+
+| Node ID pattern  | Value                                  | Example                                    |
+|------------------|----------------------------------------|--------------------------------------------|
+| `inputText-*`    | Free text string                       | `"A futuristic city at sunset"`            |
+| `inputImage-*`   | S3 object key returned by initiate     | `"user_assets/62a34ac6.../photo.jpg"`      |
+| `inputVideo-*`   | S3 object key returned by initiate     | `"user_assets/62a34ac6.../clip.mp4"`       |
+
+**Responses**
+
+```json
+// 200 — Image generation complete (synchronous)
+{
+  "success": true,
+  "finalStatus": "complete",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.png"
+}
+```
+
+```json
+// 200 — Video generation started (asynchronous)
+{
+  "success": true,
+  "finalStatus": "pending"
+}
+```
+
+```json
+// 400 — Missing generationId
+{ "error": "missing generationId" }
+
+// 400 — Job already started or in wrong state
+{ "error": "cannot start in processing state" }
+
+// 401 — Unauthorized
+{ "error": "unauthorized" }
+
+// 404 — Generation record not found
+{ "error": "generation record not found or access denied" }
+
+// 500 — Workflow execution failed (credits are refunded automatically)
+{ "error": "<message>" }
+```
+
+**Async video flow**
+
+When `finalStatus` is `"pending"`, the video is being generated by RunPod in the background. When complete (or failed), the user receives a **FCM push notification** with the following data payload:
+
+```json
+// Success notification
+{
+  "type": "generation_complete",
+  "generationId": "62a34ac6-...",
+  "videoUrl": "https://bucket.s3.amazonaws.com/...",
+  "publicUrl": "https://cdn.cloudfront.net/...",
+  "status": "complete"
+}
+
+// Failure notification (credits automatically refunded)
+{
+  "type": "generation_failed",
+  "generationId": "62a34ac6-...",
+  "reason": "runpod_job_failed: ..."
 }
 ```
 
 ---
 
-# GET /api/user/generation-history
+### 3.3 Generation History
 
-Returns the authenticated user's AI generation history for the **last 14 days**.
-
----
-
-## Base URL
-
-```
-https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com
-```
-
----
-
-## Request
-
-### Method & Path
+Returns the authenticated user's AI generation history for the **last 14 days**, sorted by creation time.
 
 ```
 GET /api/user/generation-history
 ```
 
-### Headers
+**Headers**
 
-| Header | Required | Value |
-|---|---|---|
-| `Authorization` | ✅ Yes | `Bearer <access_token>` |
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
 
----
-
-## Behavior
-
-1. Reads user email from JWT claims.
-2. Queries `UserGenerationsTable` with partition key `id = email`.
-3. Filters for records where `createdAt >= now - 14 days`.
-4. Returns fields: id, generationId, createdAt, creditUsed, publicUrl, status, subTemplateId, workflowId.
-
----
-
-## Responses
-
-### ✅ 200 OK — Success
+**Responses**
 
 ```json
+// 200
 {
   "success": true,
   "history": [
     {
-      "generationId": "050b201e-bb13-4e14-9460-77eafd677c4e",
-      "workflowId": "5b952c74-1f0c-4096-a525-66c04dace950",
-      "subTemplateId": "e017f52b-2cae-48d4-b143-68874d7f6899",
+      "id": "user@example.com",
+      "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
+      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+      "subTemplateId": "2a9dce00-0554-42b9-a339-842a1676019b",
       "status": "complete",
       "createdAt": 1777534739389,
       "creditUsed": 100,
-      "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.mp4"
+      "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.jpg"
     }
   ]
 }
 ```
 
-#### Status Values
+**History item fields**
 
-| Value | Description |
-|---|---|
-| "initiated" | Job created and credits deducted |
-| "processing" | AI workflow running |
-| "pending" | Async video generation in progress |
-| "complete" | Generation finished successfully |
-| "failed" | Generation failed; credits refunded |
+| Field           | Type     | Description                                              |
+|-----------------|----------|----------------------------------------------------------|
+| `generationId`  | `string` | Unique ID of this generation run                         |
+| `workflowId`    | `string` | Which workflow was used                                  |
+| `subTemplateId` | `string` | Which sub-template was used                              |
+| `status`        | `string` | Current status — see table below                         |
+| `createdAt`     | `number` | Unix timestamp in milliseconds                           |
+| `creditUsed`    | `number` | Credits deducted for this job                            |
+| `publicUrl`     | `string` | Signed CloudFront URL to the output (valid for 14 days). Present when `status` is `"complete"`. |
+
+**Status values**
+
+| Status        | Description                                              |
+|---------------|----------------------------------------------------------|
+| `initiated`   | Job created, credits deducted, media not yet uploaded    |
+| `processing`  | AI workflow is actively running                          |
+| `pending`     | Async video generation in progress on RunPod             |
+| `complete`    | Generation finished successfully                         |
+| `failed`      | Generation failed; credits were refunded automatically   |
+
+---
+
+## 4. Plans & Purchases
+
+### 4.1 Get Plans
+
+Returns all **Active** subscription plans and in-app purchases (IAPs) for a given platform. Plans are sorted by `monthlyPrice` ascending; IAPs by `price` ascending.
+
+```
+GET /api/user/plans?platform=android
+```
+
+**Headers**
+
+| Header          | Required | Value                    |
+|-----------------|----------|--------------------------|
+| `Authorization` | ✅        | `Bearer <access_token>`  |
+
+**Query Parameters**
+
+| Parameter  | Required | Default     | Description                  |
+|------------|----------|-------------|------------------------------|
+| `platform` | ❌        | `"android"` | `"android"` or `"ios"`       |
+
+**Responses**
+
+```json
+// 200
+{
+  "success": true,
+  "platform": "android",
+  "plans": [
+    {
+      "id": "plan_basic",
+      "name": "Basic",
+      "category": "plan",
+      "status": "Active",
+      "features": ["100 credits/month", "No ads"],
+      "highlighted": false,
+      "billing": "monthly",
+      "monthlyPrice": 4.99,
+      "yearlyPrice": 49.99,
+      "playStoreId": "com.example.app.basic_monthly",
+      "appStoreId": "com.example.app.basic_monthly"
+    }
+  ],
+  "iaps": [
+    {
+      "id": "iap_credits_100",
+      "name": "100 Credits",
+      "category": "iap",
+      "status": "Active",
+      "price": 0.99,
+      "playStoreId": "com.example.app.credits_100",
+      "appStoreId": "com.example.app.credits_100"
+    }
+  ]
+}
+```
+
+**Plan fields**
+
+| Field          | Type      | Description                                        |
+|----------------|-----------|----------------------------------------------------|
+| `id`           | `string`  | Unique plan ID                                     |
+| `name`         | `string`  | Display name                                       |
+| `category`     | `string`  | `"plan"` (subscription) or `"iap"` (one-time)     |
+| `features`     | `string[]`| List of feature descriptions                       |
+| `highlighted`  | `boolean` | Whether to visually highlight this plan (recommended) |
+| `billing`      | `string`  | `"monthly"` or `"yearly"`                          |
+| `monthlyPrice` | `number`  | Price per month                                    |
+| `yearlyPrice`  | `number`  | Price per year                                     |
+| `playStoreId`  | `string`  | Google Play product ID                             |
+| `appStoreId`   | `string`  | Apple App Store product ID                         |
+| `price`        | `number`  | IAP price (present on `iap` items only)            |
+
+---
+
+## 5. Error Reference
+
+| HTTP Status | Common Causes                                              |
+|-------------|------------------------------------------------------------|
+| `400`       | Missing required fields, invalid JSON, wrong state for operation |
+| `401`       | Missing `Authorization` header, expired or invalid token   |
+| `403`       | Insufficient credits, banned account                        |
+| `404`       | Resource not found or does not belong to the authenticated user |
+| `429`       | Too many OTP requests (rate limit)                          |
+| `500`       | Unexpected server error — check CloudWatch logs             |
+
+---
+
+## 6. Generation Lifecycle
+
+```
+Client                          API                        External Services
+  │                              │                                │
+  ├─ GET /api/user/templates ───►│                                │
+  │◄─ [ templates ] ────────────┤                                │
+  │                              │                                │
+  ├─ GET /api/user/sub-templates/{id} ─►│                         │
+  │◄─ [ subTemplates ] ─────────┤                                │
+  │                              │                                │
+  ├─ POST /api/user/generate/initiate ─►│                         │
+  │    workflowId, subTemplateId │                                │
+  │    platform, fcmToken        │──► Deduct credits (DynamoDB)   │
+  │                              │──► Generate presigned S3 URLs  │
+  │◄─ { generationId, uploadUrls}┤                                │
+  │                              │                                │
+  ├─ PUT <uploadUrl> (S3 direct) ────────────────────────────────►│ S3
+  │◄─ 200 OK ─────────────────────────────────────────────────────┤
+  │                              │                                │
+  ├─ POST /api/user/generate/start ─►│                            │
+  │    generationId, userInputs  │──► Run AI workflow             │
+  │                              │    ├─ Gemini (image gen) ─────►│ Gemini
+  │                              │    └─ RunPod (video gen) ─────►│ RunPod
+  │                              │                                │
+  │  [Image path — synchronous]  │                                │
+  │◄─ { finalStatus: "complete", │                                │
+  │     publicUrl } ─────────────┤                                │
+  │                              │                                │
+  │  [Video path — async]        │                                │
+  │◄─ { finalStatus: "pending" } ┤                                │
+  │                              │      RunPod completes ────────►│
+  │                              │◄─ wan22_callback invoked ───── │
+  │                              │──► Update DB, send FCM ───────►│ FCM
+  │◄─ Push notification ─────────────────────────────────────────►│
+  │                              │                                │
+  ├─ GET /api/user/generation-history ─►│                         │
+  │◄─ { history: [...] } ────────┤                                │
+```
+
+### Credit Behaviour
+
+- Credits are **deducted atomically** during `initiate`. If the user has insufficient credits, initiation is rejected immediately with a `403`.
+- If generation **fails** at any point (workflow error, RunPod failure), credits are **automatically refunded** to the user's balance.
+- The amount deducted and refunded is determined by the workflow's configured `credits` value.
