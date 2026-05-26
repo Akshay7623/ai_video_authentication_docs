@@ -2,14 +2,13 @@
 
 > **Base URL** `https://<UserHttpApi-ID>.execute-api.<region>.amazonaws.com`
 >
-> All protected routes require a `Authorization: Bearer <access_token>` header. Tokens are issued by the auth endpoints below.
+> All protected routes require an `Authorization: Bearer <access_token>` header.
 
 ---
 
 ## Table of Contents
 
 1. [User Profile](#1-user-profile)
-   - [Get Profile](#11-get-profile)
 2. [Templates](#2-templates)
    - [List Templates](#21-list-templates)
    - [List Sub-Templates](#22-list-sub-templates)
@@ -18,7 +17,6 @@
    - [Start Generation](#32-start-generation)
    - [Generation History](#33-generation-history)
 4. [Plans & Purchases](#4-plans--purchases)
-   - [Get Plans](#41-get-plans)
 5. [Error Reference](#5-error-reference)
 6. [Generation Lifecycle](#6-generation-lifecycle)
 
@@ -28,7 +26,7 @@
 
 ### Authentication
 
-Protected routes use a **custom Lambda JWT authorizer**. The authorizer validates the Bearer token and injects the user's `email` into the request context. If the token is missing, expired, or invalid, the request is rejected before reaching the Lambda handler.
+Protected routes use a **custom Lambda JWT authorizer**. The authorizer validates the Bearer token and injects the user's `email` into the request context.
 
 ```
 Authorization: Bearer <access_token>
@@ -36,21 +34,10 @@ Authorization: Bearer <access_token>
 
 ### Response Envelope
 
-All responses follow a consistent shape:
-
 ```json
-// Success
 { "success": true, ...data }
-
-// Error
 { "error": "human-readable message" }
-// or
-{ "success": false, "error": "human-readable message" }
 ```
-
-### CORS
-
-All endpoints allow `*` origins. `OPTIONS` preflight requests are handled automatically by API Gateway.
 
 ---
 
@@ -58,22 +45,14 @@ All endpoints allow `*` origins. `OPTIONS` preflight requests are handled automa
 
 ### 1.1 Get Profile
 
-Returns the authenticated user's profile. Sensitive fields (`passwordHash`, OTP fields, refresh token, etc.) are stripped before the response.
-
 ```
 GET /api/user/profile
+Authorization: Bearer <token>
 ```
 
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-
-**Responses**
+**Response 200**
 
 ```json
-// 200
 {
   "success": true,
   "profile": {
@@ -84,24 +63,17 @@ GET /api/user/profile
     "status": "active"
   }
 }
-
-// 401 — Missing or invalid token
-{ "message": "Unauthorized missing identity context.", "success": false }
-
-// 403 — Account banned
-{ "message": "Your account has been banned. Please contact support.", "success": false }
-
-// 404 — User record not found
-{ "message": "User not found.", "success": false }
 ```
+
+| Status | Response |
+|--------|----------|
+| 401 | `{ "message": "Unauthorized missing identity context.", "success": false }` |
+| 403 | `{ "message": "Your account has been banned. Please contact support.", "success": false }` |
+| 404 | `{ "message": "User not found.", "success": false }` |
 
 ---
 
 ## 2. Templates
-
-Templates represent the AI workflows available to users. Sub-templates are pre-filled example runs for a given template.
-
----
 
 ### 2.1 List Templates
 
@@ -109,100 +81,162 @@ Returns all **Active** deployed workflow templates.
 
 ```
 GET /api/user/templates
+Authorization: Bearer <token>
 ```
 
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-
-**Responses**
+**Response 200**
 
 ```json
-// 200
 {
   "success": true,
   "templates": [
     {
-      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
-      "name": "Photo Restoration",
-      "description": "Restore and enhance old or damaged photos",
-      "category": "image",
-      "thumbnail": "https://cdn.example.com/thumbnails/photo-restore.jpg",
+      "category": "General",
+      "credits": 60,
+      "workflowId": "f5536d77-c551-44fc-a2ca-fc3fdf5da528",
+      "description": "Powerful automated workflow ready for deployment.",
+      "name": "Cartoon Romantic Hug",
       "schema": {
         "summary": {
-          "outputType": "image",
+          "hasWan22": false,
+          "userImageInputCount": 2,
+          "outputVideoCount": 0,
           "outputImageCount": 1,
+          "fixedTextCount": 1,
+          "fixedVideoCount": 0,
           "hasGemini": true,
-          "userTextInputCount": 0
+          "outputType": "image",
+          "fixedImageCount": 0,
+          "userTextInputCount": 0,
+          "userVideoInputCount": 0
+        }
+      }
+    },
+    {
+      "category": "General",
+      "credits": 100,
+      "workflowId": "ac005294-d724-4380-8c31-b68a79978b8b",
+      "description": "Powerful automated workflow ready for deployment.",
+      "name": "Man with dog",
+      "schema": {
+        "summary": {
+          "hasWan22": true,
+          "userImageInputCount": 1,
+          "outputVideoCount": 1,
+          "outputImageCount": 0,
+          "fixedTextCount": 2,
+          "hasGemini": true,
+          "outputType": "video",
+          "fixedImageCount": 1,
+          "fixedVideoCount": 0,
+          "userTextInputCount": 0,
+          "userVideoInputCount": 0
+        }
+      }
+    },
+    {
+      "category": "General",
+      "credits": 100,
+      "workflowId": "2ffd77a3-3d50-4931-89c9-4105f706c41e",
+      "description": "Powerful automated workflow ready for deployment.",
+      "name": "Image to Video",
+      "schema": {
+        "summary": {
+          "hasWan22": true,
+          "userImageInputCount": 1,
+          "outputVideoCount": 1,
+          "outputImageCount": 0,
+          "fixedTextCount": 0,
+          "hasGemini": false,
+          "outputType": "video",
+          "fixedImageCount": 0,
+          "fixedVideoCount": 0,
+          "userTextInputCount": 1,
+          "userVideoInputCount": 0
         }
       }
     }
   ],
-  "templateOrder": ["d59d2ad2-fb2d-4f32-9880-9833a712aefc"]
+  "templateOrder": [
+    "8d0c436e-7225-4796-8ae1-a58c26b3e28d",
+    "63e79239-8420-4088-97a4-c0e78cb3931f",
+    "56aad5c6-0c56-4318-a73f-57bcf6875ddb",
+    "59731e6a-8550-45fd-b248-f370221118cb",
+    "f5536d77-c551-44fc-a2ca-fc3fdf5da528",
+    "2ffd77a3-3d50-4931-89c9-4105f706c41e"
+  ]
 }
 ```
 
-| Field           | Type       | Description                                                      |
-|-----------------|------------|------------------------------------------------------------------|
-| `workflowId`    | `string`   | Unique identifier — use this for all subsequent template calls   |
-| `name`          | `string`   | Display name                                                     |
-| `description`   | `string`   | Short description                                                |
-| `category`      | `string`   | Content category (`"image"`, `"video"`, etc.)                    |
-| `thumbnail`     | `string`   | URL of the preview image                                         |
-| `schema.summary`| `object`   | Quick-look metadata about this workflow (see below)              |
-| `templateOrder` | `string[]` | Ordered list of `workflowId`s for display ordering              |
+**Template fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflowId` | `string` | Unique identifier — use for all subsequent calls |
+| `name` | `string` | Display name |
+| `description` | `string` | Short description |
+| `category` | `string` | Content category (e.g. `"General"`) |
+| `credits` | `number` | Credits required to run this workflow |
+| `schema.summary` | `object` | Quick-look metadata (see below) |
+| `templateOrder` | `string[]` | Ordered list of `workflowId`s for display |
 
 **`schema.summary` fields**
 
-| Field                | Type      | Description                                   |
-|----------------------|-----------|-----------------------------------------------|
-| `outputType`         | `string`  | `"image"` or `"video"`                        |
-| `outputImageCount`   | `number`  | Number of images produced per run             |
-| `hasGemini`          | `boolean` | Whether the workflow uses Gemini AI           |
-| `userTextInputCount` | `number`  | Number of free-text inputs the user must fill |
+| Field | Type | Description |
+|-------|------|-------------|
+| `outputType` | `string` | `"image"` or `"video"` |
+| `hasWan22` | `boolean` | Whether the workflow uses async RunPod video generation |
+| `hasGemini` | `boolean` | Whether the workflow uses Gemini AI |
+| `userImageInputCount` | `number` | Number of image inputs the user must supply |
+| `userTextInputCount` | `number` | Number of text inputs the user must supply |
+| `userVideoInputCount` | `number` | Number of video inputs the user must supply |
+| `outputImageCount` | `number` | Number of output images produced |
+| `outputVideoCount` | `number` | Number of output videos produced |
+| `fixedImageCount` | `number` | Number of fixed (preset) image assets |
+| `fixedVideoCount` | `number` | Number of fixed (preset) video assets |
+| `fixedTextCount` | `number` | Number of fixed (preset) text prompts |
 
 ---
 
 ### 2.2 List Sub-Templates
 
-Returns all **example** sub-templates for a given workflow. Sub-templates represent pre-filled example runs and are used to show users what the workflow produces.
+Returns example sub-templates for a workflow. Each sub-template shows a sample output and the input schema the user must fill.
 
 ```
 GET /api/user/sub-templates/{workflowId}
+Authorization: Bearer <token>
 ```
 
 **Path Parameters**
 
-| Parameter    | Required | Description                          |
-|--------------|----------|--------------------------------------|
-| `workflowId` | ✅        | The `workflowId` from List Templates |
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `workflowId` | YES | The `workflowId` from List Templates |
 
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-
-**Responses**
+**Response 200 — Image workflow (e.g. Cartoon Romantic Hug)**
 
 ```json
-// 200
 {
   "success": true,
   "subTemplates": [
     {
-      "id": "2a9dce00-0554-42b9-a339-842a1676019b",
-      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
-      "title": "Restore this vintage portrait",
+      "id": "fc92b995-1a59-449a-8cba-07bd7eb37156",
+      "workflowId": "f5536d77-c551-44fc-a2ca-fc3fdf5da528",
+      "title": "Anime style couple",
       "outputType": "image",
-      "url": "https://cdn.example.com/outputs/example-result.jpg",
+      "url": "https://d1vglztnil4ntd.cloudfront.net/workflows/f5536d77-c551-44fc-a2ca-fc3fdf5da528/fc92b995-1a59-449a-8cba-07bd7eb37156/composite-fc92b995-1a59-449a-8cba-07bd7eb37156-1779646778557.jpg",
       "userInputsSchema": [
         {
-          "nodeId": "inputImage-1777726635413",
+          "feedsInto": ["geminiGen"],
           "inputType": "image",
-          "feedsInto": ["geminiGen"]
+          "label": "Female Character",
+          "nodeId": "inputImage-1779517346478"
+        },
+        {
+          "feedsInto": ["geminiGen"],
+          "inputType": "image",
+          "label": "Male Character",
+          "nodeId": "inputImage-1779517355455"
         }
       ]
     }
@@ -210,266 +244,491 @@ GET /api/user/sub-templates/{workflowId}
 }
 ```
 
-| Field              | Type       | Description                                              |
-|--------------------|------------|----------------------------------------------------------|
-| `id`               | `string`   | Sub-template ID — pass as `subTemplateId` when initiating |
-| `workflowId`       | `string`   | Parent workflow ID                                       |
-| `title`            | `string`   | Short description of this example                        |
-| `outputType`       | `string`   | `"image"` or `"video"`                                   |
-| `url`              | `string`   | URL of the example output (for preview)                  |
-| `userInputsSchema` | `object[]` | Describes each input node the user must supply           |
-
-**`userInputsSchema` item**
-
-| Field       | Type       | Description                                                  |
-|-------------|------------|--------------------------------------------------------------|
-| `nodeId`    | `string`   | Node ID — used as the key in `userInputs` when generating   |
-| `inputType` | `string`   | `"image"`, `"video"`, or `"text"`                            |
-| `feedsInto` | `string[]` | Which processing nodes consume this input                    |
-
----
-
-## 3. Generation
-
-Generating content is a **two-step process**:
-
-```
-Step 1 → POST /api/user/generate/initiate
-         • Deducts credits
-         • Returns a generationId and pre-signed S3 upload URLs for media
-
-Step 2 → Upload media directly to S3 (using the pre-signed URLs from Step 1)
-
-Step 3 → POST /api/user/generate/start
-         • Executes the AI workflow
-         • Returns the result (image) or a pending status (video)
-```
-
-See [Generation Lifecycle](#6-generation-lifecycle) for a complete flow diagram.
-
----
-
-### 3.1 Initiate Generation
-
-Creates a generation job, deducts credits from the user's balance, and returns pre-signed S3 URLs for uploading input media.
-
-```
-POST /api/user/generate/initiate
-```
-
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-| `Content-Type`  | ✅        | `application/json`       |
-
-**Request Body**
+**Response 200 — Mixed text + image workflow**
 
 ```json
 {
-  "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
-  "subTemplateId": "2a9dce00-0554-42b9-a339-842a1676019b",
-  "platform": "android",
-  "fcmToken": "dAFe8N5G...",
-  "mediaFiles": [
+  "success": true,
+  "subTemplates": [
     {
-      "nodeId": "inputImage-1777726635413",
-      "fileName": "photo.jpg",
-      "fileType": "image/jpeg"
+      "id": "08128ed9-03f1-4ed6-bd4f-41de22cd3f95",
+      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+      "title": "Text + Image",
+      "outputType": "image",
+      "url": "https://d1vglztnil4ntd.cloudfront.net/workflows/d59d2ad2-fb2d-4f32-9880-9833a712aefc/08128ed9-03f1-4ed6-bd4f-41de22cd3f95/composite-08128ed9-03f1-4ed6-bd4f-41de22cd3f95-1779780981081.jpg",
+      "userInputsSchema": [
+        {
+          "feedsInto": ["geminiGen"],
+          "inputType": "text",
+          "label": "Text Prompt",
+          "nodeId": "inputText-1777725565305"
+        },
+        {
+          "feedsInto": ["geminiGen"],
+          "inputType": "image",
+          "label": "Image 1",
+          "nodeId": "inputImage-1779641898416"
+        }
+      ]
     }
   ]
 }
 ```
 
-| Field          | Type       | Required | Description                                                                   |
-|----------------|------------|----------|-------------------------------------------------------------------------------|
-| `workflowId`   | `string`   | ✅        | From [List Templates](#21-list-templates)                                     |
-| `subTemplateId`| `string`   | ✅        | From [List Sub-Templates](#22-list-sub-templates)                             |
-| `platform`     | `string`   | ✅        | `"android"` or `"ios"` — used for push notification routing                  |
-| `fcmToken`     | `string`   | ❌        | Firebase Cloud Messaging device token — required to receive push notifications |
-| `mediaFiles`   | `object[]` | ❌        | Metadata for each media file to upload. If omitted, defaults are used.        |
+> The `url` field shows an example of how the output will look once generation is complete. Use it as a preview/thumbnail in your UI.
 
-**`mediaFiles` item**
+**`subTemplates` item fields**
 
-| Field      | Type     | Required | Description                                  |
-|------------|----------|----------|----------------------------------------------|
-| `nodeId`   | `string` | ✅        | Must match a node ID from `userInputsSchema` |
-| `fileName` | `string` | ❌        | Original filename (used for the S3 key)      |
-| `fileType` | `string` | ❌        | MIME type, e.g. `"image/jpeg"`, `"video/mp4"` |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Sub-template ID — pass as `subTemplateId` when initiating |
+| `workflowId` | `string` | Parent workflow ID |
+| `title` | `string` | Short description of this example |
+| `outputType` | `string` | `"image"` or `"video"` |
+| `url` | `string` | CloudFront URL of the example output image/video (for preview) |
+| `userInputsSchema` | `object[]` | Ordered list of inputs the user must supply |
 
-**Responses**
+**`userInputsSchema` item**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `nodeId` | `string` | Node ID — use as the key in `userInputs` at generation time |
+| `inputType` | `string` | `"image"`, `"video"`, or `"text"` |
+| `label` | `string` | Human-readable label to display in the UI |
+| `feedsInto` | `string[]` | Which processing nodes consume this input |
+
+> **UI note:** For `inputType: "text"` show a text box. For `inputType: "image"` or `"video"` show a file picker. The order of items in `userInputsSchema` is the recommended display order.
+
+| Status | Response |
+|--------|----------|
+| 401 | `{ "error": "unauthorized" }` |
+| 404 | `{ "error": "workflow not found" }` |
+
+---
+
+## 3. Generation
+
+Generating content is a **three-step process**:
+
+```
+Step 1 → POST /api/user/generate/initiate
+         Deducts credits, returns generationId + presigned S3 upload URLs
+
+Step 2 → PUT <uploadUrl>  (direct S3 upload — for each image/video input)
+
+Step 3 → POST /api/user/generate/start
+         Executes the AI workflow, returns result or pending status
+```
+
+---
+
+### 3.1 Initiate Generation
+
+Creates a generation job, deducts credits, and returns presigned S3 URLs for each media input node.
+
+```
+POST /api/user/generate/initiate
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body**
 
 ```json
-// 200 — Initiated successfully
+{
+  "workflowId": "f5536d77-c551-44fc-a2ca-fc3fdf5da528",
+  "subTemplateId": "4b8ffff8-0c32-4fbb-a56f-92f4e076e238",
+  "platform": "android",
+  "fcmToken": "dAFe8N5GfAyVOKW1L_4jh9:APA91bErYXPEIFR44U443cRi122Pmx..."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `workflowId` | `string` | YES | From List Templates |
+| `subTemplateId` | `string` | YES | From List Sub-Templates |
+| `platform` | `string` | YES | `"android"` or `"ios"` |
+| `fcmToken` | `string` | NO | FCM device token for push notifications |
+
+**Response 200**
+
+```json
 {
   "success": true,
-  "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
   "uploadUrls": [
     {
-      "nodeId": "inputImage-1777726635413",
-      "uploadUrl": "https://user-bucket.s3.ap-south-1.amazonaws.com/user_assets/...?X-Amz-Signature=...",
-      "key": "user_assets/62a34ac6.../inputImage-1777726635413_1714247549000_photo.jpg",
+      "nodeId": "inputImage-1779517355455",
+      "uploadUrl": "https://admin-backend-userss3bucket-axyhz3k8yruh.s3.ap-south-1.amazonaws.com/user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517355455_1779780389434_upload_1779780389434.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+      "key": "user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517355455_1779780389434_upload_1779780389434.jpg",
+      "inputType": "image"
+    },
+    {
+      "nodeId": "inputImage-1779517346478",
+      "uploadUrl": "https://admin-backend-userss3bucket-axyhz3k8yruh.s3.ap-south-1.amazonaws.com/user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517346478_1779780389595_upload_1779780389595.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+      "key": "user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517346478_1779780389595_upload_1779780389595.jpg",
       "inputType": "image"
     }
   ]
 }
 ```
 
-```json
-// 400 — Validation error
-{ "error": "missing workflowId or subTemplateId" }
-{ "error": "invalid or missing platform. Must be 'android' or 'ios'" }
+> Only `inputType: "image"` and `inputType: "video"` nodes appear in `uploadUrls`. Text nodes do not require an upload.
 
-// 401 — Unauthorized
-{ "error": "unauthorized" }
+**`uploadUrls` item fields**
 
-// 403 — Insufficient credits
-{ "success": false, "error": "insufficient credits" }
+| Field | Type | Description |
+|-------|------|-------------|
+| `nodeId` | `string` | Matches a `nodeId` from `userInputsSchema` |
+| `uploadUrl` | `string` | Presigned S3 PUT URL (valid for **1 hour**) |
+| `key` | `string` | S3 object key — use this as the value for image/video inputs in Step 3 |
+| `inputType` | `string` | `"image"` or `"video"` |
 
-// 404 — Workflow or sub-template not found
-{ "error": "workflow not found" }
-{ "error": "sub-template not found" }
+**After this call — upload each file:**
 
-// 500 — Internal error
-{ "error": "<message>" }
+```
+PUT <uploadUrl>
+Content-Type: image/jpeg   (or video/mp4 for video)
+Body: <raw binary file>
 ```
 
-**After this call:**
-1. Upload each media file to its `uploadUrl` using an HTTP `PUT` request with the matching `Content-Type` header. The pre-signed URL is valid for **1 hour**.
-2. Call [Start Generation](#42-start-generation) with the returned `generationId`.
+Expected response: `200 OK` (no body) from S3.
+
+**Error responses**
+
+| Status | Body |
+|--------|------|
+| 400 | `{ "error": "missing workflowId or subTemplateId" }` |
+| 400 | `{ "error": "invalid or missing platform. Must be 'android' or 'ios'" }` |
+| 401 | `{ "error": "unauthorized" }` |
+| 403 | `{ "success": false, "error": "insufficient credits" }` |
+| 404 | `{ "error": "workflow not found" }` |
+| 404 | `{ "error": "sub-template not found" }` |
+| 500 | `{ "error": "<message>" }` |
 
 ---
 
 ### 3.2 Start Generation
 
-Executes the AI workflow for a previously initiated job. This is the final trigger — the workflow runs immediately and synchronously up to the 29-second API Gateway limit. Long-running video jobs switch to async and deliver results via FCM push notification.
+Executes the AI workflow. Runs synchronously up to ~29 s (API Gateway limit). Image workflows typically complete synchronously; video workflows (`hasWan22: true`) always return `"pending"` and deliver the result via push notification.
 
 ```
 POST /api/user/generate/start
+Authorization: Bearer <token>
+Content-Type: application/json
 ```
-
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-| `Content-Type`  | ✅        | `application/json`       |
 
 **Request Body**
 
 ```json
 {
-  "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
   "userInputs": {
-    "inputText-17777889": "A futuristic city at sunset",
-    "inputImage-1777726635413": "user_assets/62a34ac6.../inputImage-1777726635413_photo.jpg"
+    "inputImage-1779517355455": "user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517355455_1779780389434_upload_1779780389434.jpg",
+    "inputImage-1779517346478": "user_assets/8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c/inputImage-1779517346478_1779780389595_upload_1779780389595.jpg"
   }
 }
 ```
 
-| Field          | Type     | Required | Description                                                               |
-|----------------|----------|----------|---------------------------------------------------------------------------|
-| `generationId` | `string` | ✅        | The ID returned by [Initiate Generation](#31-initiate-generation)         |
-| `userInputs`   | `object` | ❌        | Key-value map of `nodeId → value`. Omit or pass `{}` if no user inputs.  |
-
-**`userInputs` values by node type**
-
-| Node ID pattern  | Value                                  | Example                                    |
-|------------------|----------------------------------------|--------------------------------------------|
-| `inputText-*`    | Free text string                       | `"A futuristic city at sunset"`            |
-| `inputImage-*`   | S3 object key returned by initiate     | `"user_assets/62a34ac6.../photo.jpg"`      |
-| `inputVideo-*`   | S3 object key returned by initiate     | `"user_assets/62a34ac6.../clip.mp4"`       |
-
-**Responses**
+For a workflow that also takes text input:
 
 ```json
-// 200 — Image generation complete (synchronous)
 {
-  "success": true,
-  "finalStatus": "complete",
-  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.png"
+  "generationId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
+  "userInputs": {
+    "inputText-1777725565305": "Generate image of a sunset over mountains",
+    "inputImage-1779641898416": "user_assets/86cc7f74-e5b1-426b-b813-ca125d329b93/inputImage-1779641898416_1779781318486_upload_1779781318486.jpg"
+  }
 }
 ```
 
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `generationId` | `string` | YES | Returned by Initiate Generation |
+| `userInputs` | `object` | NO | Key-value map of `nodeId → value` |
+
+**`userInputs` values by node type**
+
+| Node ID pattern | Value | Source |
+|-----------------|-------|--------|
+| `inputText-*` | Free text string | User types this |
+| `inputImage-*` | S3 `key` from initiate response | Returned by Step 1 |
+| `inputVideo-*` | S3 `key` from initiate response | Returned by Step 1 |
+
+---
+
+#### Case A — Image generation, completes within 29 s
+
+**Response 200**
+
 ```json
-// 200 — Video generation started (asynchronous)
+{
+  "success": true,
+  "finalStatus": "complete",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/d59d2ad2-fb2d-4f32-9880-9833a712aefc/08128ed9-03f1-4ed6-bd4f-41de22cd3f95/gen_geminiGen-1777725580808_1779782169060.png?Expires=1780991769&Key-Pair-Id=K30CDW4COTXU9V&Signature=..."
+}
+```
+
+The `publicUrl` is a signed CloudFront URL valid for **14 days**.
+
+---
+
+#### Case B — Video generation (`hasWan22: true`)
+
+Video generation is always asynchronous. The API returns immediately with:
+
+**Response 200**
+
+```json
 {
   "success": true,
   "finalStatus": "pending"
 }
 ```
 
+The result is delivered via FCM push notification when RunPod completes (see [Async Notifications](#async-notifications) below).
+
+---
+
+#### Case C — API Gateway timeout (504) for image generation
+
+If image generation exceeds ~29 s, API Gateway closes the connection and responds with:
+
+**Response 504**
+
 ```json
-// 400 — Missing generationId
-{ "error": "missing generationId" }
-
-// 400 — Job already started or in wrong state
-{ "error": "cannot start in processing state" }
-
-// 401 — Unauthorized
-{ "error": "unauthorized" }
-
-// 404 — Generation record not found
-{ "error": "generation record not found or access denied" }
-
-// 500 — Workflow execution failed (credits are refunded automatically)
-{ "error": "<message>" }
+{
+  "message": "Internal server error"
+}
 ```
 
-**Async video flow**
-
-When `finalStatus` is `"pending"`, the video is being generated by RunPod in the background. When complete (or failed), the user receives a **FCM push notification** with the following data payload:
+The Lambda continues running in the background. When the image is ready, the result is delivered via **FCM push notification** (same payload as Case A, sent via the notify Lambda):
 
 ```json
-// Success notification
 {
   "type": "generation_complete",
-  "generationId": "62a34ac6-...",
-  "videoUrl": "https://bucket.s3.amazonaws.com/...",
-  "publicUrl": "https://cdn.cloudfront.net/...",
-  "status": "complete"
-}
-
-// Failure notification (credits automatically refunded)
-{
-  "type": "generation_failed",
-  "generationId": "62a34ac6-...",
-  "reason": "runpod_job_failed: ..."
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
+  "finalStatus": "complete",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/..."
 }
 ```
 
 ---
 
-### 3.3 Generation History
+#### Case D — API Gateway timeout (504) for video generation
 
-Returns the authenticated user's AI generation history for the **last 14 days**, sorted by creation time.
+Same 504 HTTP response as Case C. The video generation continues on RunPod. The result is delivered via FCM push notification triggered by the **`wan22_callback`** Lambda when RunPod completes (see [Async Notifications](#async-notifications)).
+
+---
+
+#### Other error responses
+
+| Status | Body |
+|--------|------|
+| 400 | `{ "error": "missing generationId" }` |
+| 400 | `{ "error": "cannot start in processing state" }` |
+| 401 | `{ "error": "unauthorized" }` |
+| 404 | `{ "error": "generation record not found or access denied" }` |
+| 500 | `{ "error": "<message>" }` (credits automatically refunded) |
+
+---
+
+### Async Notifications
+
+FCM is the fallback and final-result channel for generation requests that cannot return the finished media inside the `/api/user/generate/start` HTTP response.
+
+To receive notifications, send both fields in `/api/user/generate/initiate`:
+
+```json
+{
+  "platform": "android",
+  "fcmToken": "<firebase-device-token>"
+}
+```
+
+| Field | Required for FCM | Description |
+|-------|------------------|-------------|
+| `platform` | YES | Must be `"android"` or `"ios"`. Used by the notification Lambda to build the platform-specific FCM payload. |
+| `fcmToken` | YES | Firebase device token for the user's current device/session. Without this, the app must rely only on polling/history. |
+
+#### FCM delivery charts
+
+Image generation result delivery:
+
+```mermaid
+flowchart TD
+  A["Client calls /generate/start"] --> B["Generate Lambda runs workflow"]
+  B --> C{"Image ready before API Gateway timeout?"}
+  C -->|Yes| D["HTTP 200: finalStatus complete + publicUrl"]
+  D --> E["Client displays image"]
+  C -->|No| F["HTTP 504: Internal server error"]
+  F --> G["Client keeps generation pending"]
+  B --> H["Lambda finishes image generation"]
+  H --> I["Notify Lambda sends FCM generation_complete"]
+  I --> J["Client matches generationId"]
+  J --> K["Client displays publicUrl"]
+  G --> J
+```
+
+Video generation result delivery:
+
+```mermaid
+flowchart TD
+  A["Client calls /generate/start"] --> B["Generate Lambda starts Wan 2.2 / RunPod job"]
+  B --> C{"Start response returned before timeout?"}
+  C -->|Yes| D["HTTP 200: finalStatus pending"]
+  C -->|No| E["HTTP 504: Internal server error"]
+  D --> F["Client keeps generation pending"]
+  E --> F
+  B --> G["RunPod continues video generation"]
+  G --> H["RunPod invokes wan22_callback"]
+  H --> I["Callback updates generation status complete"]
+  I --> J["Notify Lambda sends FCM generation_complete"]
+  J --> K["Client matches generationId"]
+  K --> L["Client displays publicUrl"]
+```
+
+Failure delivery:
+
+```mermaid
+flowchart TD
+  A["Generation fails"] --> B["Failure handler marks status failed"]
+  B --> C["Credits are refunded"]
+  C --> D["Notify Lambda sends FCM generation_failed"]
+  D --> E["Client matches generationId"]
+  E --> F["Client shows failed state and retry option"]
+```
+
+#### Image generation notification
+
+Image generation usually returns synchronously:
+
+```json
+{
+  "success": true,
+  "finalStatus": "complete",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/..."
+}
+```
+
+If image generation takes longer than the API Gateway limit, the HTTP request returns `504`:
+
+```json
+{
+  "message": "Internal server error"
+}
+```
+
+The Lambda can still finish after the client receives the `504`. In that case, the app receives this FCM data payload:
+
+```json
+{
+  "type": "generation_complete",
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
+  "finalStatus": "complete",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/..."
+}
+```
+
+Client behavior for image jobs:
+
+| Event | What app should do |
+|-------|--------------------|
+| `/generate/start` returns `200 complete` | Show `publicUrl` immediately. |
+| `/generate/start` returns `504` | Keep the generation in a loading/pending state and wait for `type: "generation_complete"` notification. |
+| FCM `generation_complete` arrives | Use `generationId` to match the pending request and display `publicUrl`. |
+| No FCM received | Refresh `/api/user/generation-history` and match by `generationId`. |
+
+#### Video generation notification
+
+Video generation uses Wan 2.2 / RunPod and is asynchronous. A normal video request returns:
+
+```json
+{
+  "success": true,
+  "finalStatus": "pending"
+}
+```
+
+This means the request started successfully, but the final video is not ready yet. The final result is sent later by `wan22_callback` after RunPod completes.
+
+If `/generate/start` itself runs longer than the API Gateway limit, the user may receive `504`:
+
+```json
+{
+  "message": "Internal server error"
+}
+```
+
+Even in that case, the RunPod job may continue. The app should keep the generation pending and wait for the final FCM completion notification.
+
+Video completion payload sent by `wan22_callback`:
+
+```json
+{
+  "type": "generation_complete",
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
+  "workflowId": "ac005294-d724-4380-8c31-b68a79978b8b",
+  "subTemplateId": "4b8ffff8-0c32-4fbb-a56f-92f4e076e238",
+  "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/...?Expires=...&Key-Pair-Id=...&Signature=...",
+  "status": "complete"
+}
+```
+
+Client behavior for video jobs:
+
+| Event | What app should do |
+|-------|--------------------|
+| `/generate/start` returns `200 pending` | Show pending/processing state for this `generationId`. |
+| `/generate/start` returns `504` | Do not mark failed immediately. Keep pending and wait for FCM or history refresh. |
+| FCM `generation_complete` arrives with `videoUrl` / `publicUrl` | Mark generation complete and display `publicUrl`. |
+| No FCM received | Refresh `/api/user/generation-history` and match by `generationId`. |
+
+#### Failure notification
+
+If generation fails after credits were deducted, credits are automatically refunded and the app receives:
+
+```json
+{
+  "type": "generation_failed",
+  "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
+  "reason": "runpod_job_failed: ..."
+}
+```
+
+Client behavior for failures:
+
+| Event | What app should do |
+|-------|--------------------|
+| FCM `generation_failed` arrives | Mark the generation failed and show a retry option. |
+| `reason` is present | Log/display a user-safe error message. |
+| Credits were deducted | Treat them as refunded by backend failure handling. |
+
+---
+
+### 3.3 Generation History
 
 ```
 GET /api/user/generation-history
+Authorization: Bearer <token>
 ```
 
-**Headers**
+Returns the authenticated user's AI generation history for the **last 14 days**, sorted by creation time descending.
 
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
-
-**Responses**
+**Response 200**
 
 ```json
-// 200
 {
   "success": true,
   "history": [
     {
       "id": "user@example.com",
-      "generationId": "62a34ac6-fb68-481a-bdaf-05b69ea34bc3",
-      "workflowId": "d59d2ad2-fb2d-4f32-9880-9833a712aefc",
-      "subTemplateId": "2a9dce00-0554-42b9-a339-842a1676019b",
+      "generationId": "8dc4e5cf-d180-42df-856d-3b6cc2c8fd7c",
+      "workflowId": "f5536d77-c551-44fc-a2ca-fc3fdf5da528",
+      "subTemplateId": "4b8ffff8-0c32-4fbb-a56f-92f4e076e238",
       "status": "complete",
       "createdAt": 1777534739389,
-      "creditUsed": 100,
+      "creditUsed": 60,
       "publicUrl": "https://d397ajnx16aos2.cloudfront.net/outputs/.../result.jpg"
     }
   ]
@@ -478,25 +737,25 @@ GET /api/user/generation-history
 
 **History item fields**
 
-| Field           | Type     | Description                                              |
-|-----------------|----------|----------------------------------------------------------|
-| `generationId`  | `string` | Unique ID of this generation run                         |
-| `workflowId`    | `string` | Which workflow was used                                  |
-| `subTemplateId` | `string` | Which sub-template was used                              |
-| `status`        | `string` | Current status — see table below                         |
-| `createdAt`     | `number` | Unix timestamp in milliseconds                           |
-| `creditUsed`    | `number` | Credits deducted for this job                            |
-| `publicUrl`     | `string` | Signed CloudFront URL to the output (valid for 14 days). Present when `status` is `"complete"`. |
+| Field | Type | Description |
+|-------|------|-------------|
+| `generationId` | `string` | Unique ID of this generation run |
+| `workflowId` | `string` | Which workflow was used |
+| `subTemplateId` | `string` | Which sub-template was used |
+| `status` | `string` | See status table below |
+| `createdAt` | `number` | Unix timestamp in milliseconds |
+| `creditUsed` | `number` | Credits deducted for this job |
+| `publicUrl` | `string` | Signed CloudFront URL (valid 14 days). Only present when `status` is `"complete"` |
 
 **Status values**
 
-| Status        | Description                                              |
-|---------------|----------------------------------------------------------|
-| `initiated`   | Job created, credits deducted, media not yet uploaded    |
-| `processing`  | AI workflow is actively running                          |
-| `pending`     | Async video generation in progress on RunPod             |
-| `complete`    | Generation finished successfully                         |
-| `failed`      | Generation failed; credits were refunded automatically   |
+| Status | Description |
+|--------|-------------|
+| `initiated` | Job created, credits deducted, media not yet uploaded |
+| `processing` | AI workflow is actively running |
+| `pending` | Async video generation in progress on RunPod |
+| `complete` | Generation finished successfully |
+| `failed` | Generation failed; credits were refunded automatically |
 
 ---
 
@@ -504,28 +763,20 @@ GET /api/user/generation-history
 
 ### 4.1 Get Plans
 
-Returns all **Active** subscription plans and in-app purchases (IAPs) for a given platform. Plans are sorted by `monthlyPrice` ascending; IAPs by `price` ascending.
-
 ```
 GET /api/user/plans?platform=android
+Authorization: Bearer <token>
 ```
-
-**Headers**
-
-| Header          | Required | Value                    |
-|-----------------|----------|--------------------------|
-| `Authorization` | ✅        | `Bearer <access_token>`  |
 
 **Query Parameters**
 
-| Parameter  | Required | Default     | Description                  |
-|------------|----------|-------------|------------------------------|
-| `platform` | ❌        | `"android"` | `"android"` or `"ios"`       |
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `platform` | NO | `"android"` | `"android"` or `"ios"` |
 
-**Responses**
+**Response 200**
 
 ```json
-// 200
 {
   "success": true,
   "platform": "android",
@@ -558,79 +809,68 @@ GET /api/user/plans?platform=android
 }
 ```
 
-**Plan fields**
-
-| Field          | Type      | Description                                        |
-|----------------|-----------|----------------------------------------------------|
-| `id`           | `string`  | Unique plan ID                                     |
-| `name`         | `string`  | Display name                                       |
-| `category`     | `string`  | `"plan"` (subscription) or `"iap"` (one-time)     |
-| `features`     | `string[]`| List of feature descriptions                       |
-| `highlighted`  | `boolean` | Whether to visually highlight this plan (recommended) |
-| `billing`      | `string`  | `"monthly"` or `"yearly"`                          |
-| `monthlyPrice` | `number`  | Price per month                                    |
-| `yearlyPrice`  | `number`  | Price per year                                     |
-| `playStoreId`  | `string`  | Google Play product ID                             |
-| `appStoreId`   | `string`  | Apple App Store product ID                         |
-| `price`        | `number`  | IAP price (present on `iap` items only)            |
-
 ---
 
 ## 5. Error Reference
 
-| HTTP Status | Common Causes                                              |
-|-------------|------------------------------------------------------------|
-| `400`       | Missing required fields, invalid JSON, wrong state for operation |
-| `401`       | Missing `Authorization` header, expired or invalid token   |
-| `403`       | Insufficient credits, banned account                        |
-| `404`       | Resource not found or does not belong to the authenticated user |
-| `429`       | Too many OTP requests (rate limit)                          |
-| `500`       | Unexpected server error — check CloudWatch logs             |
+| HTTP Status | Common Causes |
+|-------------|---------------|
+| 400 | Missing required fields, invalid JSON, wrong state |
+| 401 | Missing or invalid `Authorization` header |
+| 403 | Insufficient credits, banned account |
+| 404 | Resource not found or not owned by the user |
+| 504 | API Gateway timeout (29 s exceeded) — result delivered via push notification |
+| 500 | Unexpected server error |
 
 ---
 
 ## 6. Generation Lifecycle
 
 ```
-Client                          API                        External Services
-  │                              │                                │
-  ├─ GET /api/user/templates ───►│                                │
-  │◄─ [ templates ] ────────────┤                                │
-  │                              │                                │
-  ├─ GET /api/user/sub-templates/{id} ─►│                         │
-  │◄─ [ subTemplates ] ─────────┤                                │
-  │                              │                                │
-  ├─ POST /api/user/generate/initiate ─►│                         │
-  │    workflowId, subTemplateId │                                │
-  │    platform, fcmToken        │──► Deduct credits (DynamoDB)   │
-  │                              │──► Generate presigned S3 URLs  │
-  │◄─ { generationId, uploadUrls}┤                                │
-  │                              │                                │
-  ├─ PUT <uploadUrl> (S3 direct) ────────────────────────────────►│ S3
-  │◄─ 200 OK ─────────────────────────────────────────────────────┤
-  │                              │                                │
-  ├─ POST /api/user/generate/start ─►│                            │
-  │    generationId, userInputs  │──► Run AI workflow             │
-  │                              │    ├─ Gemini (image gen) ─────►│ Gemini
-  │                              │    └─ RunPod (video gen) ─────►│ RunPod
-  │                              │                                │
-  │  [Image path — synchronous]  │                                │
-  │◄─ { finalStatus: "complete", │                                │
-  │     publicUrl } ─────────────┤                                │
-  │                              │                                │
-  │  [Video path — async]        │                                │
-  │◄─ { finalStatus: "pending" } ┤                                │
-  │                              │      RunPod completes ────────►│
-  │                              │◄─ wan22_callback invoked ───── │
-  │                              │──► Update DB, send FCM ───────►│ FCM
-  │◄─ Push notification ─────────────────────────────────────────►│
-  │                              │                                │
-  ├─ GET /api/user/generation-history ─►│                         │
-  │◄─ { history: [...] } ────────┤                                │
+Client                        API                         External
+  |                             |                              |
+  |-- GET /templates ---------->|                              |
+  |<-- { templates, order } ----|                              |
+  |                             |                              |
+  |-- GET /sub-templates/{id} ->|                              |
+  |<-- { subTemplates } --------|                              |
+  |                             |                              |
+  |-- POST /generate/initiate ->|                              |
+  |   workflowId, subTemplateId |-- Deduct credits (DynamoDB) |
+  |   platform, fcmToken        |-- Generate presigned URLs    |
+  |<-- { generationId,          |                              |
+  |      uploadUrls } ----------|                              |
+  |                             |                              |
+  |-- PUT <uploadUrl> (S3) ---------------------->| S3         |
+  |<-- 200 OK -------------------------------------------|    |
+  |                             |                              |
+  |-- POST /generate/start ---->|                              |
+  |   generationId, userInputs  |-- Run AI workflow            |
+  |                             |   +-- Gemini (image) ------->| Gemini
+  |                             |   +-- RunPod (video) ------->| RunPod
+  |                             |                              |
+  | [Image, within 29s]         |                              |
+  |<-- { finalStatus:"complete",|                              |
+  |      publicUrl } -----------|                              |
+  |                             |                              |
+  | [Image OR Video, >29s]      |                              |
+  |<-- 504 timeout -------------|                              |
+  |        (Lambda still runs)  |-- FCM push when done ------->| FCM
+  |<-- push notification -----------------------------------|   |
+  |                             |                              |
+  | [Video, always pending]     |                              |
+  |<-- { finalStatus:"pending" }|                              |
+  |                             |       RunPod completes ------>|
+  |                             |<-- wan22_callback invoked ----|
+  |                             |-- Update DB, send FCM ------->| FCM
+  |<-- push notification -----------------------------------|   |
+  |                             |                              |
+  |-- GET /generation-history ->|                              |
+  |<-- { history: [...] } ------|                              |
 ```
 
 ### Credit Behaviour
 
-- Credits are **deducted atomically** during `initiate`. If the user has insufficient credits, initiation is rejected immediately with a `403`.
-- If generation **fails** at any point (workflow error, RunPod failure), credits are **automatically refunded** to the user's balance.
-- The amount deducted and refunded is determined by the workflow's configured `credits` value.
+- Credits are **deducted atomically** during `initiate`. Insufficient credits → `403` immediately.
+- If generation **fails** at any point, credits are **automatically refunded**.
+- The deducted amount equals the workflow's configured `credits` value.
