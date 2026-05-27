@@ -18,9 +18,9 @@ POST /api/user/verify-purchase
 
 ### Headers
 
-| Header | Value |
-|---|---|
-| `Content-Type` | `application/json` |
+| Header          | Value                   |
+| --------------- | ----------------------- |
+| `Content-Type`  | `application/json`      |
 | `Authorization` | `Bearer <access_token>` |
 
 ### Body
@@ -35,13 +35,13 @@ POST /api/user/verify-purchase
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `store` | `"google"` \| `"apple"` | Yes | Which store the purchase came from |
-| `purchaseToken` | `string` | Yes | See [Per-platform values](#per-platform-values) below |
-| `productId` | `string` | Yes | The product or subscription ID from the store (e.g. `premium_monthly`) |
-| `packageName` | `string` | No | Android only — your app's package name (e.g. `com.yourapp`). Can be omitted if already configured on the server |
-| `purchaseType` | `"subscription"` \| `"iap"` | No | Defaults to `"subscription"`. Use `"iap"` for one-time credit pack purchases |
+| Field           | Type                        | Required | Description                                                                                                     |
+| --------------- | --------------------------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `store`         | `"google"` \| `"apple"`     | Yes      | Which store the purchase came from                                                                              |
+| `purchaseToken` | `string`                    | Yes      | See [Per-platform values](#per-platform-values) below                                                           |
+| `productId`     | `string`                    | Yes      | The product or subscription ID as shown in your store console (e.g. `credits_100`). Sent as a cross-check — the server validates this against the `productId` the store API returns directly. A mismatch is logged as a warning and the store's value is used. |
+| `packageName`   | `string`                    | No       | Android only — your app's package name (e.g. `com.yourapp`). Can be omitted if already configured on the server |
+| `purchaseType`  | `"subscription"` \| `"iap"` | No       | Defaults to `"subscription"`. Use `"iap"` for one-time credit pack purchases                                    |
 
 ---
 
@@ -51,13 +51,13 @@ POST /api/user/verify-purchase
 
 Use the values returned by the Play Billing Library after a successful purchase:
 
-| Request field | Where to get it |
-|---|---|
-| `store` | `"google"` (hardcoded) |
-| `purchaseToken` | `Purchase.purchaseToken` |
-| `productId` | `Purchase.products[0]` (or the subscription ID) |
-| `packageName` | Your app's `applicationId` from `build.gradle` |
-| `purchaseType` | `"subscription"` for subscriptions, `"iap"` for one-time products |
+| Request field   | Where to get it                                                   |
+| --------------- | ----------------------------------------------------------------- |
+| `store`         | `"google"` (hardcoded)                                            |
+| `purchaseToken` | `Purchase.purchaseToken`                                          |
+| `productId`     | `Purchase.products[0]` — sent for cross-validation; server verifies against Google's API response |
+| `packageName`   | Your app's `applicationId` from `build.gradle`                    |
+| `purchaseType`  | `"subscription"` for subscriptions, `"iap"` for one-time products |
 
 **Kotlin example:**
 
@@ -80,13 +80,13 @@ apiClient.post("/api/user/verify-purchase", body, accessToken)
 
 Use the values from the `Transaction` object after a successful purchase:
 
-| Request field | Where to get it |
-|---|---|
-| `store` | `"apple"` (hardcoded) |
+| Request field   | Where to get it                                                                  |
+| --------------- | -------------------------------------------------------------------------------- |
+| `store`         | `"apple"` (hardcoded)                                                            |
 | `purchaseToken` | `transaction.originalID.description` (preferred) or `transaction.id.description` |
-| `productId` | `transaction.productID` |
-| `packageName` | Not needed — omit this field |
-| `purchaseType` | `"subscription"` for auto-renewable subscriptions, `"iap"` for consumables |
+| `productId`     | `transaction.productID` — sent for cross-validation; server verifies against the Apple-signed `JWSTransaction` |
+| `packageName`   | Not needed — omit this field                                                     |
+| `purchaseType`  | `"subscription"` for auto-renewable subscriptions, `"iap"` for consumables       |
 
 **Swift example:**
 
@@ -128,7 +128,9 @@ sequenceDiagram
     App->>Server: POST /api/user/verify-purchase
     Note right of App: store, purchaseToken,\nproductId, purchaseType
     Server->>Play: GET subscriptionsv2/tokens/{token}
-    Play-->>Server: SubscriptionPurchaseV2
+    Note over Server,Play: IAP uses productsv2/tokens/{token}
+    Play-->>Server: Response with store-verified productId
+    Server->>Server: Validate client productId vs store productId
     Server-->>App: 200 OK
     App->>App: Refresh profile and unlock content
 ```
@@ -148,7 +150,8 @@ sequenceDiagram
     App->>Server: POST /api/user/verify-purchase
     Note right of App: store, purchaseToken\n(originalID), productId
     Server->>SK: GET /inApps/v1/transactions/{id}
-    SK-->>Server: JWSTransaction (signed)
+    SK-->>Server: JWSTransaction with productId inside
+    Server->>Server: Validate client productId vs transaction.productId
     Server-->>App: 200 OK
     App->>SK: transaction.finish()
     App->>App: Refresh profile and unlock content
@@ -177,7 +180,7 @@ The purchase was verified and the account has been updated.
 ```
 
 - For `purchaseType: "iap"` the `message` will be `"Credits added successfully."`.
-- `plan` is the matched plan object, or `null` if no plan was found for the given `productId`.
+- `plan` is matched using the **store-verified** `productId` from the API response, not the client-provided value. Returns `null` if no matching plan is found.
 
 ### 400 — Invalid request
 
@@ -222,13 +225,13 @@ The purchase token exists but the purchase is not in an active state (e.g. alrea
 
 Possible `status` values:
 
-| Status | Meaning |
-|---|---|
-| `active` | Purchase is valid and active (you won't see this on a 402) |
-| `expired` | Subscription has expired or was refunded |
-| `on_hold` | Account on hold (billing issue) |
-| `billing_retry` | In billing retry period |
-| `unknown` | State could not be determined |
+| Status          | Meaning                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `active`        | Purchase is valid and active (you won't see this on a 402) |
+| `expired`       | Subscription has expired or was refunded                   |
+| `on_hold`       | Account on hold (billing issue)                            |
+| `billing_retry` | In billing retry period                                    |
+| `unknown`       | State could not be determined                              |
 
 ### 403 — Account banned
 
@@ -284,6 +287,7 @@ flowchart TD
 
 ## Notes
 
+- **`productId` is cross-validated server-side** — the server extracts the authoritative `productId` directly from Google's or Apple's API response and uses it for plan lookup. The client-supplied value is used only as a last-resort fallback. If the two values differ, a warning is logged and the store's value wins. This prevents a malicious client from purchasing a cheap product but claiming a more expensive `productId` to receive more credits.
 - **Call this as soon as checkout completes**, before navigating away from the purchase screen.
 - On **iOS**, do not call `transaction.finish()` until you receive a `200` from this endpoint. If you finish the transaction before verification, StoreKit will not re-deliver it on the next launch.
 - On **Android**, the purchase will remain in a `PURCHASED` (unacknowledged) state for 3 days. If it is not acknowledged within that window, Google will automatically refund it. Calling this endpoint acknowledges it server-side.
