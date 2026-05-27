@@ -1,8 +1,6 @@
 # Apple App Store Webhook
 
-This endpoint receives real-time App Store Server Notifications (V2 / StoreKit 2) from Apple. It is called automatically by Apple's infrastructure — **your iOS app does not call this endpoint**.
-
-Understanding what this webhook handles helps you know what subscription state changes your app should expect and when to refresh the user's profile.
+This endpoint receives real-time App Store Server Notifications (V2 / StoreKit 2) from Apple for both **IAP (one-time consumable credit packs)** and auto-renewable subscriptions. It is called automatically by Apple's infrastructure — **your iOS app never calls this endpoint directly**.
 
 ---
 
@@ -13,17 +11,27 @@ POST /api/user/webhook/apple-appstore
 ```
 
 **Auth:** None — called by Apple's servers, not the app  
-**Your app's role:** None. Just refresh the user profile when the app comes to the foreground.
+**Your app's role:** None. Call `GET /api/user/profile` when the app comes to the foreground to pick up any changes.
 
 ---
 
 ## What This Webhook Handles
 
-Apple sends a notification for every subscription or consumable lifecycle event. The server processes these and updates the user's subscription status automatically.
+Apple sends a signed JWS payload containing a `notificationType` for every lifecycle event.
 
-### Subscription events (`Auto-Renewable Subscription`)
+### IAP (Consumable) events
 
-| `notificationType` | `subtype` | What it means | Resulting status |
+Fired when a refund is granted on a one-time credit pack purchase.
+
+| `notificationType` | `type` in transaction | What it means | Action taken |
+|---|---|---|---|
+| `REFUND` | non-subscription | Apple granted a refund on a consumable purchase | Deduct `plan.credits` from user — if already spent, reset `credits` to `0` |
+
+> Apple does **not** send a `PURCHASED` notification for consumables. Your app calls `verify-purchase` directly after the StoreKit transaction completes — that is the only path for adding credits. This webhook only handles the refund case.
+
+### Subscription events
+
+| `notificationType` | `subtype` | What it means | Resulting `subscriptionStatus` |
 |---|---|---|---|
 | `SUBSCRIBED` | any | New subscription or re-subscribe after lapse | `active` |
 | `DID_RENEW` | any | Auto-renewed successfully | `active` |
@@ -33,19 +41,39 @@ Apple sends a notification for every subscription or consumable lifecycle event.
 | `DID_CHANGE_RENEWAL_STATUS` | `AUTO_RENEW_ENABLED` | User re-enabled auto-renew | `active` |
 | `EXPIRED` | any | Subscription has fully expired | `expired` |
 | `REVOKE` | any | Family Sharing access was revoked | `expired` |
-| `REFUND` | any | Refund was granted | `expired` |
+| `REFUND` | any | Refund was granted on a subscription | `expired` |
 | `DID_FAIL_TO_RENEW` | any | Billing failed | `billing_retry` |
 | `PRICE_INCREASE` | any | Price increase pending user consent | `billing_retry` |
 | `GRACE_PERIOD_EXPIRED` | any | Grace period ended without payment | `billing_retry` |
 | `DID_CHANGE_RENEWAL_STATUS` | `AUTO_RENEW_DISABLED` | User turned off auto-renew | `canceling` |
 
-### Consumable events
+---
 
-| `notificationType` | What it means | Action taken |
-|---|---|---|
-| `REFUND` | Refund granted on a consumable purchase | Logged for review |
+## IAP Lifecycle
 
-### Subscription Lifecycle
+Apple does **not** send a webhook when a consumable is purchased — the only webhook Apple sends for consumables is a `REFUND`. This means the credit-add path always goes through `verify-purchase`, and the webhook only runs the credit-deduct path.
+
+```mermaid
+flowchart TD
+    A([User buys credit pack]) --> B[StoreKit 2 processes payment]
+    B --> C[App gets Transaction.originalID]
+    C --> D[App calls POST /api/user/verify-purchase]
+    D --> E([Credits added immediately])
+
+    F([Apple grants refund]) --> G[Apple sends REFUND webhook]
+    G --> H[Decode signedPayload JWS\nDecode signedTransactionInfo JWS]
+    H --> I[Look up user via originalTransactionId\nfrom UserPurchasesTable]
+    I --> J[Look up plan.credits from PlansTable\nusing productId]
+    J --> K{User has enough\ncredits?}
+    K -- Yes --> L[credits = credits - plan.credits]
+    K -- No, already spent --> M[credits = 0]
+    L --> N([Done])
+    M --> N
+```
+
+---
+
+## Subscription Lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -88,11 +116,12 @@ stateDiagram-v2
 
 ## What Your App Should Do
 
-Your app does not need to listen for or react to these webhook events in real time. Instead:
+Your app does not react to these webhook events in real time. Instead:
 
-1. **After a successful `verify-purchase` call** — refresh the user profile to reflect the newly activated plan.
-2. **On app foreground / resume** — call `GET /api/user/profile` to pick up any status changes that happened while the app was closed (renewals, cancellations, billing failures, etc.).
-3. **Handle `Transaction.updates` in StoreKit 2** — always listen for transaction updates in your app so StoreKit can deliver any purchases that completed while the app was in the background.
+1. **After `verify-purchase` returns 200** — refresh the user profile to show the updated credit balance.
+2. **On app foreground / resume** — call `GET /api/user/profile` to pick up any changes (including refund deductions) that happened while the app was closed.
+3. **Read the `credits` field** from the profile response to show the current balance.
+4. **Handle `Transaction.updates` in StoreKit 2** — always listen for transaction updates so StoreKit can deliver purchases that completed while the app was in the background.
 
 **Swift example — listening for transaction updates on app launch:**
 
@@ -101,7 +130,7 @@ Your app does not need to listen for or react to these webhook events in real ti
 .task {
     for await result in Transaction.updates {
         guard case .verified(let transaction) = result else { continue }
-        // Re-verify with your server if needed
+        // Call verify-purchase with transaction.originalID if not yet processed
         await transaction.finish()
     }
 }
@@ -109,17 +138,27 @@ Your app does not need to listen for or react to these webhook events in real ti
 
 ---
 
+## PlansTable Requirement
+
+The webhook resolves the number of credits to deduct on a refund by scanning `PlansTable` for a row where `appStoreId` matches the `productId` in the refunded transaction.
+
+**Each plan row must have:**
+
+| Field | Example | Description |
+|---|---|---|
+| `appStoreId` | `"credits_100"` | Must exactly match the Product ID in App Store Connect |
+| `credits` | `100` | Number of credits to deduct on refund |
+
+If `appStoreId` is missing or doesn't match, the webhook logs a warning and takes no action.
+
+---
+
 ## Notes
 
-- **Renewals are silent** — the App Store renews subscriptions automatically and sends a `DID_RENEW` notification to the webhook. Your app just needs to re-fetch the user profile periodically to reflect the latest state.
-- `canceling` (`DID_CHANGE_RENEWAL_STATUS` / `AUTO_RENEW_DISABLED`) means the user turned off auto-renew but is still active until the end of the billing period. The status will change to `expired` when `EXPIRED` is received.
-- To deep-link the user to the App Store subscription management page:
-  ```swift
-  if let url = URL(string: "https://apps.apple.com/account/subscriptions") {
-      await UIApplication.shared.open(url)
-  }
-  ```
-- For sandbox testing, use a Sandbox Apple ID and set your app to the sandbox environment. Apple sends sandbox notifications to the same registered endpoint.
+- **No webhook on purchase** — Apple does not send a notification when a consumable is purchased. Credits are always added by `verify-purchase`. This webhook only handles the `REFUND` case.
+- **Refund deduction logic** — if the user already spent the credits before the refund was processed, `credits` is reset to `0` rather than going negative.
+- **Apple always gets `200`** — Apple retries failed deliveries with exponential backoff for up to 60 days. The server always returns `200` to acknowledge receipt even when nothing needs to be done; idempotency at the application level handles duplicates.
+- **Sandbox testing** — register both Production and Sandbox URLs in App Store Connect. Apple uses separate servers for sandbox notifications, so both must point to the same endpoint.
 
 ---
 
@@ -131,17 +170,18 @@ sequenceDiagram
     participant S as Your Server
     participant I as iOS App
 
-    Note over A,S: Subscription event occurs (renewal, cancel, billing failure, etc.)
+    Note over A,S: User gets a refund on a credit pack
     A->>S: POST /api/user/webhook/apple-appstore
     Note right of A: { signedPayload: JWS }
     S->>S: Decode outer JWS (notification envelope)
     S->>S: Decode inner signedTransactionInfo JWS
-    S->>S: Map notificationType to subscriptionStatus
-    S->>S: Update user record in database
-    S-->>A: 200 OK (always, to prevent Apple retries)
+    S->>S: Confirm type is consumable and notificationType is REFUND
+    S->>S: Look up user via originalTransactionId
+    S->>S: Deduct credits (or reset to 0 if already spent)
+    S-->>A: 200 OK
 
-    Note over I: User opens the app later
+    Note over I: User opens the app
     I->>S: GET /api/user/profile
-    S-->>I: subscriptionStatus updated
-    I->>I: Show correct UI for current status
+    S-->>I: credits balance updated
+    I->>I: Refresh credit display
 ```
